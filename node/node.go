@@ -1,11 +1,19 @@
-package main
+package node
 
+/*
 import (
 	"flag"
 	"log"
 
+	"github.com/globalsign/mgo/bson"
 	"github.com/streadway/amqp"
 )
+
+type Person struct {
+	Name       string `bson:"name"`
+	Age        int64  `bson:"age"`
+	Profession string `bson:"profession"`
+}
 
 func handleError(err error, msg string) {
 	if err != nil {
@@ -77,3 +85,14 @@ func main() {
 	log.Printf("Waiting for messages sent to %s...", *name)
 	<-forever
 }
+
+func GetPerson(p Packet, q *Queue) {
+	payload := message.GetPerson{}
+	gob.Unmarshal(p.Body, &payload)
+
+	person := fromDatabase.Find(bson.M{"name", payload.Name})
+	answer := gob.Marshal(messages.ResponsePerson{Name: person.Name})
+
+	q.Publish(answer)
+}
+*/

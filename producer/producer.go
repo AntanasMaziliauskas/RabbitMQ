@@ -7,6 +7,13 @@ import (
 	"github.com/streadway/amqp"
 )
 
+/*
+type Person struct {
+	Name       string `bson:"name"`
+	Age        int64  `bson:"age"`
+	Profession string `bson:"profession"`
+}
+*/
 func handleError(err error, msg string) {
 	if err != nil {
 		log.Fatalf("%s: %s", msg, err)
@@ -51,42 +58,11 @@ func main() {
 	handleError(err, "Failed to publish a message")
 
 	log.Printf("Sending message to %s: %s", *to, *msg)
+
+	//JUDAM TOLIAU
+	result, err := broker.Call("node-id", "getPerson", message.GetPerson{Name: "jonas"})
+
 }
-
-//Node
-/*
-func main() {
-    ...
-    broker.RegisterCallback("getPersonList", GetPersonList)
-    broker.RegisterCallback("getPerson", GetPerson)
-    ...
-}
-
-func GetPersonList(p Packet, q *Queue) {
-   ...
-}
-
-func GetPerson(p Packet, q *Queue) {
-   payload := message.GetPerson{}
-   gob.Unmarshal(p.Body, &payload)
-
-   person := fromDatabase.Find(bson.M{"name", payload.Name})
-   answer := gob.Marshal(messages.ResponsePerson{Name: person.Name})
-
-   q.Publish(answer)
-}
-*/
-
-//Server
-/*
-func main() {
-   ...
-   result, err := broker.Call("node-id", "getPerson", message.GetPerson{Name: "jonas"})
-   ...
-   result, err := broker.Broadcast("getPersonList", message.GetPersonList{})
-   ...
-}
-*/
 
 //GOB example
 /*
