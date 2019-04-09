@@ -29,6 +29,13 @@ func main() {
 				return service.UpsertPerson(c)
 			},
 		},
+		{
+			Name:  "listpersonsbroadcast",
+			Usage: "Returns information about person from  Node that is specified",
+			Action: func(c *cli.Context) error {
+				return service.ListPersonsBroadcast(c)
+			},
+		},
 	}
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
@@ -37,7 +44,7 @@ func main() {
 			Usage: "Name of the Node",
 		},
 		cli.StringFlag{
-			Name:  "name",
+			Name:  "person",
 			Value: "",
 			Usage: "One or a list of names. For a list use ','. If you are inserting person use '.' to specify age and profession",
 		},
