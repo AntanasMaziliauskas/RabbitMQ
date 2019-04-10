@@ -88,6 +88,12 @@ func (b *BrokerClinet) Call(node. command string, payload interface{}) (interfac
 
 func (b *BrokerClient) Listen() {
 		for d := range b.Reply {
+
+			d.Header.Action == ping {
+				.... ping online
+				continue
+			}
+
 			log.Printf("Server %s received reply.")
 			if b.callbacks[d.CorrID] {
 				b.callbacks[d.CorrID] <- d

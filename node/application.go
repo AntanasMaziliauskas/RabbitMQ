@@ -160,9 +160,47 @@ func (a *Application) Listen() {
 
 	go func() {
 		for d := range a.Command {
+			d.Ack(true)
+
 			//if d.Headers["Node"] == a.Name {
 			log.Printf("Received a message: %s", d.Headers["action"])
 			//log.Printf("Received a message Header: %s", d.Headers["action"])
+			//
+			// resp, err := a.prepareResponse(d)
+			// a.Tasks[d.Headers["action"].(string)].(func(NodeResponse))(resp)
+			//
+			//
+			/*
+
+			   func (a *Application) prepareResonse(cmd amqp.Delivery) (*NodeResponse, error) {
+			   	return &NodeResponse{
+			   		CorrID: cmd.CorrID,
+			   		app: a,
+			   	}, nil
+			   }
+
+
+			   type NodeResponse {
+			   	CorrID string
+			   	app *Application
+			   }
+
+			   func(n *NodeResponse) Publish(payload []byte) {
+
+			   	err = n.app.Ch.Publish(
+			   		"cmd",      // exchange
+			   		"response", // routing key
+			   		false,      // mandatory
+			   		false,      // immediate
+			   		amqp.Publishing{
+			   			ContentType:   "application/gob",
+			   			CorrelationId: n.CorrID,
+			   			Body:          payload,
+			   		})
+			   	d.Ack(false)
+			   }
+
+			*/
 			a.Tasks[d.Headers["action"].(string)].(func(amqp.Delivery))(d)
 		}
 		//}
@@ -216,9 +254,7 @@ func (a *Application) UpsertPerson(d amqp.Delivery) {
 }
 
 func (a *Application) ListPersons(d amqp.Delivery) {
-	//var person *types.Person
-	//GobUnmarshal(d.Body, &person)
-	//str := person.ID.Hex()
+
 	response, _ := a.Person.ListPersons()
 	//response := types.Person{Name: "Jonas", Profession: "bilekas", Age: 22}
 	atsakas, err := GobMarshal(response)
