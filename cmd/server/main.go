@@ -36,6 +36,13 @@ func main() {
 				return service.ListPersonsBroadcast(c)
 			},
 		},
+		{
+			Name:  "http",
+			Usage: "Returns information about person from  Node that is specified",
+			Action: func(c *cli.Context) {
+				service.StartHTTPServer(c)
+			},
+		},
 	}
 	app.Flags = []cli.Flag{
 		cli.StringFlag{

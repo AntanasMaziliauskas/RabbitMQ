@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/AntanasMaziliauskas/RabbitMQ/server/broker"
 	"github.com/AntanasMaziliauskas/RabbitMQ/types"
@@ -12,7 +13,8 @@ import (
 )
 
 type Application struct {
-	B broker.BrokerService
+	B  broker.BrokerService
+	wg *sync.WaitGroup
 }
 
 func (a *Application) Init() error {
@@ -39,15 +41,16 @@ func (a *Application) UpsertPerson(c *cli.Context) error {
 
 		//log.Println(result)
 	}
+	//log.Println("Pries STOP")
 	a.B.Stop()
 	return nil
 }
 
 func (a *Application) ListPersonsBroadcast(c *cli.Context) error {
 
-	a.B.ListPersonsBroadcast()
+	result, _ := a.B.ListPersonsBroadcast()
 
-	//log.Println(result)
+	log.Println(result)
 
 	a.B.Stop()
 	return nil

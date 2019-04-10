@@ -26,7 +26,7 @@ read amount
             fi
 #running 'randomObjectID' command to get random ObjectID
             ID=$(randomObjectID)
-            go run cmd/server/main.go -node $node -person $ID.$NAME.$AGE.$PROFESSION upsertperson
+            ./cmd/server/server -node $node -person $ID.$NAME.$AGE.$PROFESSION upsertperson
         done
     #fi 
 #done

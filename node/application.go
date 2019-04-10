@@ -2,8 +2,11 @@ package node
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/AntanasMaziliauskas/RabbitMQ/node/person"
 	"github.com/AntanasMaziliauskas/RabbitMQ/types"
@@ -17,6 +20,9 @@ type Application struct {
 	Conn    *amqp.Connection
 	Ch      *amqp.Channel
 	Command <-chan amqp.Delivery
+	wg      *sync.WaitGroup
+	cancel  context.CancelFunc
+	ctx     context.Context
 }
 
 func (a *Application) Init() {
@@ -31,6 +37,7 @@ func (a *Application) Init() {
 	a.Person.Init()
 	//Setinam eiles ir kanala
 	a.Rabbit()
+	a.Greeting()
 	//Klausomes kanalo
 	a.Listen()
 
@@ -54,32 +61,40 @@ func (a *Application) Rabbit() {
 	//defer ch.Close()
 
 	q, err := a.Ch.QueueDeclare(
-		"comman", // name
-		true,     // durable
-		false,    // delete when usused
-		false,    // exclusive
-		false,    // no-wait
-		nil,      // arguments
+		a.Name, // name
+		false,  // durable
+		false,  // delete when usused
+		false,  // exclusive
+		false,  // no-wait
+		nil,    // arguments
 	)
 	handleError(err, "Failed to declare a queue")
 
 	err = a.Ch.ExchangeDeclare(
-		"nodesdirects", // name
-		"topic",        // type
-		true,           // durable
-		false,          // auto-deleted
-		false,          // internal
-		false,          // no-wait
-		nil,            // arguments
+		"cmd",   // name
+		"topic", // type
+		false,   // durable
+		false,   // auto-deleted
+		false,   // internal
+		false,   // no-wait
+		nil,     // arguments
 	)
 	handleError(err, "Failed to declare an exchange")
 
 	log.Println(a.Name)
 	//routing := "nodes." + a.Name
 	err = a.Ch.QueueBind(
-		q.Name,         // queue name
-		a.Name,         // routing key
-		"nodesdirects", // exchange
+		q.Name,      // queue name
+		"broadcast", // routing key
+		"cmd",       // exchange
+		false,
+		nil)
+	handleError(err, "Failed to bind a queue")
+
+	err = a.Ch.QueueBind(
+		q.Name, // queue name
+		a.Name, // routing key
+		"cmd",  // exchange
 		false,
 		nil)
 	handleError(err, "Failed to bind a queue")
@@ -101,6 +116,38 @@ func (a *Application) Stop() {
 	a.Ch.Close()
 }
 
+func (a *Application) Greeting() {
+	log.Println("Started Pinging")
+	go func() {
+		log.Println("Inside Go Routine")
+		ticker := time.NewTicker(5 * time.Second)
+		for {
+			select {
+			case <-ticker.C:
+				log.Println("Tick")
+				err := a.Ch.Publish(
+					"cmd",  // exchange
+					"ping", // routing key
+					false,  // mandatory
+					false,  // immediate
+					amqp.Publishing{
+						ContentType: "text/plain",
+						//CorrelationId: d.CorrelationId,
+						Body: []byte(a.Name),
+					})
+				//a.Command.Ack(false)
+				handleError(err, "Failed to publish a message")
+				/*case <-a.ctx.Done():
+
+				log.Println("Ping service has stopped.")
+				a.wg.Done()
+
+				return*/
+			}
+		}
+	}()
+}
+
 func handleError(err error, msg string) {
 	if err != nil {
 		log.Fatalf("%s: %s", msg, err)
@@ -113,12 +160,12 @@ func (a *Application) Listen() {
 
 	go func() {
 		for d := range a.Command {
-			//if d.Headers["action"] != nil {
+			//if d.Headers["Node"] == a.Name {
 			log.Printf("Received a message: %s", d.Headers["action"])
 			//log.Printf("Received a message Header: %s", d.Headers["action"])
 			a.Tasks[d.Headers["action"].(string)].(func(amqp.Delivery))(d)
-			//}
 		}
+		//}
 	}()
 
 	log.Printf("Waiting for messages sent to %s...", a.Name)
@@ -135,10 +182,10 @@ func (a *Application) GetPerson(d amqp.Delivery) {
 	handleError(err, "Failed to Marshal with gob")
 
 	err = a.Ch.Publish(
-		"",        // exchange
-		d.ReplyTo, // routing key
-		false,     // mandatory
-		false,     // immediate
+		"cmd",      // exchange
+		"response", // routing key
+		false,      // mandatory
+		false,      // immediate
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: d.CorrelationId,
@@ -152,16 +199,13 @@ func (a *Application) UpsertPerson(d amqp.Delivery) {
 	var person *types.Person
 
 	GobUnmarshal(d.Body, &person)
-	a.Person.UpsertPerson(person)
-	//response := types.Person{Name: "Jonas", Profession: "bilekas", Age: 22}
-	//atsakas, err := GobMarshal(response)
-	//handleError(err, "Failed to Marshal with gob")
+	//a.Person.UpsertPerson(person)
 
 	err := a.Ch.Publish(
-		"",        // exchange
-		d.ReplyTo, // routing key
-		false,     // mandatory
-		false,     // immediate
+		"cmd",      // exchange
+		"response", // routing key
+		false,      // mandatory
+		false,      // immediate
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: d.CorrelationId,
@@ -181,10 +225,10 @@ func (a *Application) ListPersons(d amqp.Delivery) {
 	handleError(err, "Failed to Marshal with gob")
 
 	err = a.Ch.Publish(
-		"",        // exchange
-		d.ReplyTo, // routing key
-		false,     // mandatory
-		false,     // immediate
+		"cmd",      // exchange
+		"response", // routing key
+		false,      // mandatory
+		false,      // immediate
 		amqp.Publishing{
 			ContentType:   "text/plain",
 			CorrelationId: d.CorrelationId,

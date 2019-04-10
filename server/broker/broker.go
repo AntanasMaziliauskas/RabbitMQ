@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"log"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/AntanasMaziliauskas/RabbitMQ/types"
@@ -16,18 +17,89 @@ type BrokerService interface {
 	Stop() error
 	GetPersonNode(string, string, types.Person) (types.Person, error)
 	UpsertPerson(string, string, types.Person) error
-	ListPersonsBroadcast() error
+	ListPersonsBroadcast() ([]types.Person, error)
+	ListenForGreeting()
 }
 
 type BrokerClient struct {
-	Conn    *amqp.Connection
-	Ch      *amqp.Channel
-	Consume <-chan amqp.Delivery
+	Conn  *amqp.Connection
+	Ch    *amqp.Channel
+	Reply <-chan amqp.Delivery
+	Ping  <-chan amqp.Delivery
+	wg    *sync.WaitGroup
+	Nodes map[string]*types.Node
 }
+
+/*
+
+func (b *BrokerClinet) Call(node. command string, payload interface{}) (interface{}, error) {
+
+	corrID := genNewCorrID()
+
+//
+	xxx := struct{
+		chan,
+		created time.Time,
+		count int,
+	}
+//
+
+
+
+	reply := make(chan, amqp.Delivery, 1)
+	timeout := time.NewTicker(1s)
+	b.callbacks[corrID] := reply
+
+	gob := GobMarshal(payload)
+	b.ch.Publish(
+		...
+		body: gob,
+		Header.CorrID: corrID
+		...
+	)
+
+
+	// veliau
+	for count > 0 || timeout {
+		packet := <- b.callbacks[corrID]
+		x := gob.Unmarshal(packet.Body)
+		data[nodeID] = x
+
+		coun--
+	}
+
+	select {
+	case packet := <- b.callbacks[corrID]:
+		x := gob.Unmarshal(packet.Body)
+		return x, nil
+	case <- timeout.C:
+		close(b.callbacks[corr])
+		timeout.Stop()
+		delete(b.callbacks[corr])
+		return nil, fmt.Error("timeouted")
+	}
+
+
+
+	return data, nil
+}
+
+
+
+func (b *BrokerClient) Listen() {
+		for d := range b.Reply {
+			log.Printf("Server %s received reply.")
+			if b.callbacks[d.CorrID] {
+				b.callbacks[d.CorrID] <- d
+			}
+		}
+}
+*/
 
 func (b *BrokerClient) Init() error {
 	var err error
 
+	b.Nodes = make(map[string]*types.Node)
 	rand.Seed(time.Now().UTC().UnixNano())
 	b.Conn = &amqp.Connection{}
 	b.Ch = &amqp.Channel{}
@@ -38,27 +110,68 @@ func (b *BrokerClient) Init() error {
 	handleError(err, "Failed to open a channel")
 
 	err = b.Ch.ExchangeDeclare(
-		"nodesdirects", // name
-		"topic",        // type
-		true,           // durable
-		false,          // auto-deleted
-		false,          // internal
-		false,          // no-wait
-		nil,            // arguments
+		"cmd",   // name
+		"topic", // type
+		false,   // durable
+		false,   // auto-deleted
+		false,   // internal
+		false,   // no-wait
+		nil,     // arguments
 	)
 	handleError(err, "Failed to declare an exchange")
 
+	//response queue
 	q, err := b.Ch.QueueDeclare(
-		"response", // name
-		false,      // durable
-		false,      // delete when usused
-		false,      // exclusive
-		false,      // noWait
-		nil,        // arguments
+		"",    // name
+		false, // durable
+		false, // delete when usused
+		false, // exclusive
+		false, // noWait
+		nil,   // arguments
 	)
 	handleError(err, "Failed to declare a queue")
 
-	b.Consume, err = b.Ch.Consume(
+	//ping queue
+	p, err := b.Ch.QueueDeclare(
+		"",    // name
+		false, // durable
+		false, // delete when usused
+		false, // exclusive
+		false, // noWait
+		nil,   // arguments
+	)
+	handleError(err, "Failed to declare a queue")
+
+	//Bindinam Ping queue
+	err = b.Ch.QueueBind(
+		p.Name, // queue name
+		"ping", // routing key
+		"cmd",  // exchange
+		false,
+		nil)
+	handleError(err, "Failed to bind a queue")
+
+	//Bindinam response queue
+	err = b.Ch.QueueBind(
+		q.Name,     // queue name
+		"response", // routing key
+		"cmd",      // exchange
+		false,
+		nil)
+	handleError(err, "Failed to bind a queue")
+
+	b.Ping, err = b.Ch.Consume(
+		p.Name, // queue
+		"",     // consumer
+		false,  // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	handleError(err, "Failed to register a consumer")
+
+	b.Reply, err = b.Ch.Consume(
 		q.Name, // queue
 		"",     // consumer
 		false,  // auto-ack
@@ -78,6 +191,21 @@ func (b *BrokerClient) Stop() error {
 	return nil
 }
 
+func (b *BrokerClient) ListenForGreeting() {
+	//b.wg.Add(1)
+	go func() {
+		//defer b.wg.Done()
+		for d := range b.Ping {
+			log.Printf("Node %s connected.", string(d.Body))
+			b.Nodes[string(d.Body)] = &types.Node{
+				LastSeen: time.Now(),
+				IsOnline: true,
+			}
+			d.Ack(false)
+		}
+	}()
+}
+
 func (b *BrokerClient) GetPersonNode(to string, action string, person types.Person) (types.Person, error) {
 	res := types.Person{}
 
@@ -87,20 +215,21 @@ func (b *BrokerClient) GetPersonNode(to string, action string, person types.Pers
 	log.Println(to)
 	//to = "nodes." + to
 	err := b.Ch.Publish(
-		"nodesdirects", // exchange
-		to,             // routing key
-		false,          // mandatory
-		false,          // immediate
+		"cmd", // exchange
+		to,    // routing key
+		false, // mandatory
+		false, // immediate
 		amqp.Publishing{
-			Headers:       map[string]interface{}{"action": "getPerson"},
+			Headers:       map[string]interface{}{"Node": to, "action": "getPerson"},
 			ContentType:   "text/plain",
 			CorrelationId: corrId,
-			ReplyTo:       "response",  //q.Name
-			Body:          []byte(per), //Convert
+			//ReplyTo:       "response",  //q.Name
+			Body: []byte(per), //Convert
 		})
+
 	handleError(err, "Failed to publish a message")
 
-	for d := range b.Consume {
+	for d := range b.Reply {
 		if corrId == d.CorrelationId {
 			GobUnmarshal(d.Body, &res)
 			//res.Profession = string(d.Body)
@@ -112,69 +241,49 @@ func (b *BrokerClient) GetPersonNode(to string, action string, person types.Pers
 }
 
 func (b *BrokerClient) UpsertPerson(to string, action string, person types.Person) error {
-	res := types.Person{}
+	//res := types.Person{}
 
-	corrId := randomString(32)
+	//	corrId := randomString(32)
 	per, _ := GobMarshal(person)
 
 	err := b.Ch.Publish(
-		"",    // exchange
+		"cmd", // exchange
 		to,    // routing key
 		false, // mandatory
 		false, // immediate
 		amqp.Publishing{
 			Headers:       map[string]interface{}{"action": "upsertPerson"},
 			ContentType:   "text/plain",
-			CorrelationId: corrId,
+			CorrelationId: "corrId",
 			ReplyTo:       "response",
 			Body:          []byte(per), //Convert
 		})
 	handleError(err, "Failed to publish a message")
 
-	for d := range b.Consume {
+	/*for d := range b.Reply {
 		if corrId == d.CorrelationId {
 			GobUnmarshal(d.Body, &res)
 			//res.Profession = string(d.Body)
 			break
 		}
-	}
+	}*/
 
 	return nil
 }
 
 //TODO: FANOUT
-func (b *BrokerClient) ListPersonsBroadcast() error {
+func (b *BrokerClient) ListPersonsBroadcast() ([]types.Person, error) {
 	res := []types.Person{}
 	result := []types.Person{}
-
-	/*err := b.Ch.ExchangeDeclare(
-		"broadcast", // name
-		"fanout",    // type
-		false,       // durable
-		false,       // auto-deleted
-		false,       // internal
-		false,       // no-wait
-		nil,         // arguments
-	)
-	handleError(err, "Failed to declare exchange")*/
-
-	/*err = b.Ch.QueueBind(
-		q.Name,    // queue name
-		"nodes.*", // routing key
-		"tasks",   // exchange
-		false,
-		nil,
-	)
-	handleError(err, "Failed to declare binding")*/
 
 	corrId := randomString(32)
 	//per, _ := GobMarshal(person)
 
 	err := b.Ch.Publish(
-		"nodes", // exchange
-		"nodes", // routing key
-		false,   // mandatory
-		false,   // immediate
+		"cmd",       // exchange
+		"broadcast", // routing key
+		false,       // mandatory
+		false,       // immediate
 		amqp.Publishing{
 			Headers:       map[string]interface{}{"action": "listPersons"},
 			ContentType:   "text/plain",
@@ -185,16 +294,20 @@ func (b *BrokerClient) ListPersonsBroadcast() error {
 	handleError(err, "Failed to publish a message")
 
 	//Kaip cia viskas atrodys?
-	for d := range b.Consume {
+	i := 1
+	for d := range b.Reply {
 		if corrId == d.CorrelationId {
+			i++
 			GobUnmarshal(d.Body, &res)
 			result = append(result, res...)
 			//res.Profession = string(d.Body)
-			break
+			if i > len(b.Nodes) {
+				break
+			}
 		}
 	}
-
-	return nil
+	//log.Println(result)
+	return result, nil
 }
 
 func handleError(err error, msg string) {
